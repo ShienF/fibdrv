@@ -1,0 +1,43 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/src/linux-headers-5.13.0-35-generic/include/uapi/linux",
+                "/usr/src/linux-headers-5.13.0-35-generic/include/linux",
+                // "/usr/src/linux-hwe-5.13-headers-5.13.0-35/include/uapi",
+                // "/usr/src/linux-hwe-5.13-headers-5.13.0-35/include/uapi/linux",
+                "/lib/modules/5.13.0-35-generic/build/arch/x86/include",
+                "/lib/modules/5.13.0-35-generic/build/arch/x86/include/generated",
+                "/lib/modules/5.13.0-35-generic/build/include",
+                "/lib/modules/5.13.0-35-generic/build/include/generated"
+            ],
+            "defines": ["MODULE",
+                "__KERNEL__"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",//"c11"
+            "cppStandard": "gnu++14",//c++17
+            "intelliSenseMode": "linux-gcc-x64" //clang-x64
+        }
+    ],
+    "version": 4
+}
+
+// {
+//     "configurations": [
+//         {
+//             "name": "Linux",
+//             "includePath": [
+//                 "${workspaceFolder}/**"
+//             ],
+//             "defines": [],
+//             "compilerPath": "/usr/bin/clang-10",
+//             "cStandard": "c11",
+//             "cppStandard": "c++14",
+//             "intelliSenseMode": "linux-clang-x64"
+//         }
+//     ],
+//     "version": 4
+// }

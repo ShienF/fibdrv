@@ -7,6 +7,8 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
+#include "xs.c"
+
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 MODULE_DESCRIPTION("Fibonacci engine driver");
@@ -17,26 +19,157 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100  // 92
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+
+#define XOR_SWAP(a, b, type) \
+    do {                     \
+        type *__c = (a);     \
+        type *__d = (b);     \
+        *__c ^= *__d;        \
+        *__d ^= *__c;        \
+        *__c ^= *__d;        \
+    } while (0)
+
+static void __swap(void *a, void *b, size_t size)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
+    if (a == b)
+        return;
 
-    f[0] = 0;
-    f[1] = 1;
+    switch (size) {
+    case 1:
+        XOR_SWAP(a, b, char);
+        break;
+    case 2:
+        XOR_SWAP(a, b, short);
+        break;
+    case 4:
+        XOR_SWAP(a, b, unsigned int);
+        break;
+    case 8:
+        XOR_SWAP(a, b, unsigned long);
+        break;
+    default:
+        /* Do nothing */
+        break;
+    }
+}
 
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+static void reverse_str(char *str, size_t n)
+{
+    for (int i = 0; i < (n >> 1); i++)
+        __swap(&str[i], &str[n - i - 1], sizeof(char));
+}
+
+static void string_number_add(xs *a, xs *b, xs *out)
+{
+    char *data_a, *data_b;
+    size_t size_a, size_b;
+    int i, carry = 0;
+    int sum;
+
+    /*
+     * Make sure the string length of 'a' is always greater than
+     * the one of 'b'.
+     */
+    if (xs_size(a) < xs_size(b))
+        __swap((void *) &a, (void *) &b, sizeof(void *));
+
+    data_a = xs_data(a);
+    data_b = xs_data(b);
+
+    size_a = xs_size(a);
+    size_b = xs_size(b);
+
+    reverse_str(data_a, size_a);
+    reverse_str(data_b, size_b);
+
+    char buf[size_a + 2];
+
+    for (i = 0; i < size_b; i++) {
+        sum = (data_a[i] - '0') + (data_b[i] - '0') + carry;
+        buf[i] = '0' + sum % 10;
+        carry = sum / 10;
     }
 
-    return f[k];
+    for (i = size_b; i < size_a; i++) {
+        sum = (data_a[i] - '0') + carry;
+        buf[i] = '0' + sum % 10;
+        carry = sum / 10;
+    }
+
+    if (carry)
+        buf[i++] = '0' + carry;
+
+    buf[i] = 0;
+
+    reverse_str(buf, i);
+
+    /* Restore the original string */
+    reverse_str(data_a, size_a);
+    reverse_str(data_b, size_b);
+
+    if (out)
+        *out = *xs_tmp(buf);
+}
+
+// long long fib_sequence(long long k)
+// {
+//     if (k < 2) {
+//         return k;
+//     }
+
+//     long long k1 = 0, k2 = 1, sum;
+
+//     for (int i = 2; i <= k; i++) {
+//         sum = k1 + k2;
+//         k1 = k2;
+//         k2 = sum;
+//     }
+
+//     return k2;
+// }
+
+int fib_sequence_bigNum_ten(long long k, char __user *buf)
+{
+    int length = 1;
+
+    if (k == 0) {
+        char *tmp = "0";
+        copy_to_user(buf, tmp, length);
+    } else if (k == 1) {
+        char *tmp = "1";
+        copy_to_user(buf, tmp, length);
+    } else {
+        xs *k1 = (xs *) kmalloc(sizeof(xs), GFP_KERNEL),
+           *k2 = (xs *) kmalloc(sizeof(xs), GFP_KERNEL),
+           *sum = (xs *) kmalloc(sizeof(xs), GFP_KERNEL);  //
+
+        *k1 = *xs_tmp("0");
+        *k2 = *xs_tmp("1");
+
+        for (int i = 2; i <= k; i++) {
+            string_number_add(k1, k2, sum);
+            *k1 = *xs_new(k1, xs_data(k2));
+            *k2 = *xs_new(k2, xs_data(sum));
+        }
+
+        length = xs_size(k2);
+
+        // printk(KERN_INFO  "result = %s", xs_data(k2));
+
+        copy_to_user(buf, xs_data(k2), length);
+
+        xs_free(k1);
+        xs_free(k2);
+        xs_free(sum);
+    }
+    return length;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -55,13 +188,20 @@ static int fib_release(struct inode *inode, struct file *file)
 }
 
 /* calculate the fibonacci number at given offset */
-static ssize_t fib_read(struct file *file,
-                        char *buf,
+static ssize_t fib_read(struct file *file,  // ssize_t: long long
+                        char __user *buf,
                         size_t size,
-                        loff_t *offset)
+                        loff_t *offset)  // loff_t: long long
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence_bigNum_ten(*offset, buf);
 }
+// static ssize_t fib_read(struct file *file,
+//                         char *buf,
+//                         size_t size,
+//                         loff_t *offset)
+// {
+//     return (ssize_t) fib_sequence(*offset);
+// }
 
 /* write operation is skipped */
 static ssize_t fib_write(struct file *file,
