@@ -7,7 +7,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
-#include "xs.c"
+#include "xs.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -26,6 +26,8 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
+static ktime_t kt;
+static ktime_t k_to_u;
 
 #define XOR_SWAP(a, b, type) \
     do {                     \
@@ -118,22 +120,67 @@ static void string_number_add(xs *a, xs *b, xs *out)
         *out = *xs_tmp(buf);
 }
 
-// long long fib_sequence(long long k)
-// {
-//     if (k < 2) {
-//         return k;
-//     }
+static long long fib_sequence_vla(long long k)
+{
+    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
+    long long f[k + 2];
 
-//     long long k1 = 0, k2 = 1, sum;
+    f[0] = 0;
+    f[1] = 1;
 
-//     for (int i = 2; i <= k; i++) {
-//         sum = k1 + k2;
-//         k1 = k2;
-//         k2 = sum;
-//     }
+    for (int i = 2; i <= k; i++) {
+        f[i] = f[i - 1] + f[i - 2];
+    }
 
-//     return k2;
-// }
+    return f[k];
+}
+
+long long fib_sequence(long long k)
+{
+    if (k < 2) {
+        return k;
+    }
+
+    long long k1 = 0, k2 = 1;
+
+    for (int i = 2; i <= k; i++) {
+        long long sum;
+        sum = k1 + k2;
+        k1 = k2;
+        k2 = sum;
+    }
+
+    return k2;
+}
+
+long long fib_sequence_fastd(long long k)
+{
+    if (k < 2) {
+        return k;
+    }
+
+    int bits = 0;
+    for (unsigned int i = k; i; bits++, i >>= 1)
+        ;
+
+    long long k1 = 0, k2 = 1;
+    for (unsigned int i = bits; i; i -= 1) {
+        long long Tk1, Tk2;
+        Tk1 = k1 * (2 * k2 - k1);
+        Tk2 = k2 * k2 + k1 * k1;
+
+        k1 = Tk1;
+        k2 = Tk2;
+
+        if (k & (1UL << (i - 1))) {
+            Tk1 = k1 + k2;
+            k1 = k2;
+            k2 = Tk1;
+        }
+    }
+
+    return k1;
+}
 
 int fib_sequence_bigNum_ten(long long k, char __user *buf)
 {
@@ -172,6 +219,7 @@ int fib_sequence_bigNum_ten(long long k, char __user *buf)
     return length;
 }
 
+
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -188,13 +236,7 @@ static int fib_release(struct inode *inode, struct file *file)
 }
 
 /* calculate the fibonacci number at given offset */
-static ssize_t fib_read(struct file *file,  // ssize_t: long long
-                        char __user *buf,
-                        size_t size,
-                        loff_t *offset)  // loff_t: long long
-{
-    return (ssize_t) fib_sequence_bigNum_ten(*offset, buf);
-}
+
 // static ssize_t fib_read(struct file *file,
 //                         char *buf,
 //                         size_t size,
@@ -203,13 +245,68 @@ static ssize_t fib_read(struct file *file,  // ssize_t: long long
 //     return (ssize_t) fib_sequence(*offset);
 // }
 
-/* write operation is skipped */
+// static ssize_t fib_read(struct file *file,
+//                         char *buf,
+//                         size_t size,
+//                         loff_t *offset)
+// {
+//     return (ssize_t) fib_sequence_fastd(*offset);
+// }
+
+static ssize_t fib_read(struct file *file,  // ssize_t: long long
+                        char __user *buf,
+                        size_t size,
+                        loff_t *offset)  // loff_t: long long
+{
+    kt = ktime_get();
+    ssize_t res = (ssize_t) fib_sequence_bigNum_ten(*offset, buf);
+    k_to_u = ktime_get();
+    kt = ktime_sub(k_to_u, kt);
+    return res;
+}
+
+
+/* write operation is skipped
+ * so use this to calculate time spent in kernel*/
 static ssize_t fib_write(struct file *file,
                          const char *buf,
                          size_t size,
                          loff_t *offset)
 {
-    return 1;
+    switch (size) {
+    case 0:
+        kt = ktime_get();
+        fib_sequence_vla(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+
+    case 1:
+        kt = ktime_get();
+        fib_sequence(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+
+    case 2:
+        kt = ktime_get();
+        fib_sequence_fastd(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+
+    case 3:
+        fib_sequence_bigNum_ten(*offset, buf);
+        kt = ktime_get();
+        break;
+
+    case 4:
+        return (ssize_t) ktime_to_ns(k_to_u);
+
+    case 5:
+        return (ssize_t) ktime_to_ns(kt);
+
+    default:
+        return 0;
+    }
+    return (ssize_t) ktime_to_ns(kt);
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)

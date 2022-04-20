@@ -9,16 +9,21 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
+#
+$(TARGET_MODULE)-objs := fibdrv_core.o xs.o
+
 all: $(GIT_HOOKS) client
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
 	@scripts/install-git-hooks
 	@echo
-
+	
+#
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
-	$(RM) client out
+	$(RM) client out client_m performance.txt plot.png
+
 load:
 	sudo insmod $(TARGET_MODULE).ko
 unload:
@@ -26,6 +31,13 @@ unload:
 
 client: client.c
 	$(CC) -o $@ $^
+
+#
+client_m: client_measurement.c
+	$(CC) -o $@ $^
+#
+plot: all
+	sh performance.sh
 
 PRINTF = env printf
 PASS_COLOR = \e[32;01m

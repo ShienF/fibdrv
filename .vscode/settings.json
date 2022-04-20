@@ -11,6 +11,12 @@
         "limits": "c",
         "sstream": "c",
         "streambuf": "c",
-        "functional": "c"
+        "functional": "c",
+        "kernel.h": "c",
+        "fs.h": "c",
+        "init.h": "c",
+        "kdev_t.h": "c",
+        "module.h": "c",
+        "mutex.h": "c"
     }
 }
