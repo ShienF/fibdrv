@@ -17,6 +17,8 @@
         "init.h": "c",
         "kdev_t.h": "c",
         "module.h": "c",
-        "mutex.h": "c"
-    }
+        "mutex.h": "c",
+        "slab.h": "c"
+    },
+    "ros.distro": "foxy"
 }
