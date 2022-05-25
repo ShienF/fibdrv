@@ -7,7 +7,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
-#include "xs.h"
+#include "bn.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -29,96 +29,6 @@ static DEFINE_MUTEX(fib_mutex);
 static ktime_t kt;
 static ktime_t k_to_u;
 
-#define XOR_SWAP(a, b, type) \
-    do {                     \
-        type *__c = (a);     \
-        type *__d = (b);     \
-        *__c ^= *__d;        \
-        *__d ^= *__c;        \
-        *__c ^= *__d;        \
-    } while (0)
-
-static void __swap(void *a, void *b, size_t size)
-{
-    if (a == b)
-        return;
-
-    switch (size) {
-    case 1:
-        XOR_SWAP(a, b, char);
-        break;
-    case 2:
-        XOR_SWAP(a, b, short);
-        break;
-    case 4:
-        XOR_SWAP(a, b, unsigned int);
-        break;
-    case 8:
-        XOR_SWAP(a, b, unsigned long);
-        break;
-    default:
-        /* Do nothing */
-        break;
-    }
-}
-
-static void reverse_str(char *str, size_t n)
-{
-    for (int i = 0; i < (n >> 1); i++)
-        __swap(&str[i], &str[n - i - 1], sizeof(char));
-}
-
-static void string_number_add(xs *a, xs *b, xs *out)
-{
-    char *data_a, *data_b;
-    size_t size_a, size_b;
-    int i, carry = 0;
-    int sum;
-
-    /*
-     * Make sure the string length of 'a' is always greater than
-     * the one of 'b'.
-     */
-    if (xs_size(a) < xs_size(b))
-        __swap((void *) &a, (void *) &b, sizeof(void *));
-
-    data_a = xs_data(a);
-    data_b = xs_data(b);
-
-    size_a = xs_size(a);
-    size_b = xs_size(b);
-
-    reverse_str(data_a, size_a);
-    reverse_str(data_b, size_b);
-
-    char buf[size_a + 2];
-
-    for (i = 0; i < size_b; i++) {
-        sum = (data_a[i] - '0') + (data_b[i] - '0') + carry;
-        buf[i] = '0' + sum % 10;
-        carry = sum / 10;
-    }
-
-    for (i = size_b; i < size_a; i++) {
-        sum = (data_a[i] - '0') + carry;
-        buf[i] = '0' + sum % 10;
-        carry = sum / 10;
-    }
-
-    if (carry)
-        buf[i++] = '0' + carry;
-
-    buf[i] = 0;
-
-    reverse_str(buf, i);
-
-    /* Restore the original string */
-    reverse_str(data_a, size_a);
-    reverse_str(data_b, size_b);
-
-    if (out)
-        *out = *xs_tmp(buf);
-}
 
 static long long fib_sequence_vla(long long k)
 {
@@ -182,44 +92,6 @@ long long fib_sequence_fastd(long long k)
     return k1;
 }
 
-int fib_sequence_bigNum_ten(long long k, char __user *buf)
-{
-    int length = 1;
-
-    if (k == 0) {
-        char *tmp = "0";
-        copy_to_user(buf, tmp, length);
-    } else if (k == 1) {
-        char *tmp = "1";
-        copy_to_user(buf, tmp, length);
-    } else {
-        xs *k1 = (xs *) kmalloc(sizeof(xs), GFP_KERNEL),
-           *k2 = (xs *) kmalloc(sizeof(xs), GFP_KERNEL),
-           *sum = (xs *) kmalloc(sizeof(xs), GFP_KERNEL);  //
-
-        *k1 = *xs_tmp("0");
-        *k2 = *xs_tmp("1");
-
-        for (int i = 2; i <= k; i++) {
-            string_number_add(k1, k2, sum);
-            *k1 = *xs_new(k1, xs_data(k2));
-            *k2 = *xs_new(k2, xs_data(sum));
-        }
-
-        length = xs_size(k2);
-
-        // printk(KERN_INFO  "result = %s", xs_data(k2));
-
-        copy_to_user(buf, xs_data(k2), length);
-
-        xs_free(k1);
-        xs_free(k2);
-        xs_free(sum);
-    }
-    return length;
-}
-
-
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -236,33 +108,30 @@ static int fib_release(struct inode *inode, struct file *file)
 }
 
 /* calculate the fibonacci number at given offset */
-
-// static ssize_t fib_read(struct file *file,
-//                         char *buf,
-//                         size_t size,
-//                         loff_t *offset)
-// {
-//     return (ssize_t) fib_sequence(*offset);
-// }
-
-// static ssize_t fib_read(struct file *file,
-//                         char *buf,
-//                         size_t size,
-//                         loff_t *offset)
-// {
-//     return (ssize_t) fib_sequence_fastd(*offset);
-// }
-
 static ssize_t fib_read(struct file *file,  // ssize_t: long long
                         char __user *buf,
                         size_t size,
                         loff_t *offset)  // loff_t: long long
 {
     kt = ktime_get();
-    ssize_t res = (ssize_t) fib_sequence_bigNum_ten(*offset, buf);
+
+    // ssize_t res = (ssize_t) fib_sequence_bigNum_ten(*offset, buf);
+    bn *res = bnAlloc(1);
+    // bnFib(res, *offset);
+    bnFibFastd(res, *offset);
+    char *p = bnToString(res);
+    unsigned int len = strlen(p) + 1;
+    copy_to_user(buf, p, len);
+
     k_to_u = ktime_get();
     kt = ktime_sub(k_to_u, kt);
-    return res;
+
+    bnFree(res);
+    kfree(p);
+
+    // return (ssize_t) fib_sequence_fastd(*offset);
+
+    return len;
 }
 
 
@@ -273,6 +142,8 @@ static ssize_t fib_write(struct file *file,
                          size_t size,
                          loff_t *offset)
 {
+    bn *res = bnAlloc(1);
+
     switch (size) {
     case 0:
         kt = ktime_get();
@@ -293,14 +164,21 @@ static ssize_t fib_write(struct file *file,
         break;
 
     case 3:
-        fib_sequence_bigNum_ten(*offset, buf);
         kt = ktime_get();
+        bnFib(res, *offset);
+        kt = ktime_sub(ktime_get(), kt);
         break;
 
     case 4:
-        return (ssize_t) ktime_to_ns(k_to_u);
+        kt = ktime_get();
+        bnFibFastd(res, *offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
 
     case 5:
+        return (ssize_t) ktime_to_ns(k_to_u);
+
+    case 6:
         return (ssize_t) ktime_to_ns(kt);
 
     default:

@@ -36,10 +36,11 @@ int main()
         clock_gettime(CLOCK_MONOTONIC, &start);
         sz = read(fd, buf, 1);
         clock_gettime(CLOCK_MONOTONIC, &end);
+        buf[sz - 1] = '\0';
         printf("Reading from " FIB_DEV
                " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, sz);
+               "%s.\n",
+               i, buf);
         // printf("%lld\n", (long long)((end.tv_sec * 1e9 + end.tv_nsec)- \
         //         (start.tv_sec * 1e9 + start.tv_nsec)));
     }
@@ -47,31 +48,12 @@ int main()
     for (int i = offset; i >= 0; i--) {
         lseek(fd, i, SEEK_SET);
         sz = read(fd, buf, 1);
+        buf[sz - 1] = '\0';
         printf("Reading from " FIB_DEV
                " at offset %d, returned the sequence "
-               "%lld.\n",
-               i, sz);
+               "%s.\n",
+               i, buf);
     }
-
-    // for (int i = 0; i <= offset; i++) {
-    //     lseek(fd, i, SEEK_SET);
-    //     sz = read(fd, buf, sizeof(buf));
-    //     buf[sz] = 0;
-    //     printf("Reading from " FIB_DEV //
-    //            " at offset %d, returned the sequence "
-    //            "%s.\n",
-    //            i, buf);
-    // }
-
-    // for (int i = offset; i >= 0; i--) {
-    //     lseek(fd, i, SEEK_SET);
-    //     sz = read(fd, buf, sizeof(buf));
-    //     buf[sz] = 0;
-    //     printf("Reading from " FIB_DEV
-    //            " at offset %d, returned the sequence "
-    //            "%s.\n",
-    //            i, buf);
-    // }
 
     close(fd);
     return 0;

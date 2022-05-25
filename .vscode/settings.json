@@ -26,7 +26,8 @@
         "utility": "c",
         "random": "c",
         "tuple": "c",
-        "minmax.h": "c"
+        "minmax.h": "c",
+        "stdio.h": "c"
     },
     "ros.distro": "foxy"
 }
